@@ -121,6 +121,33 @@ app.include_router(recommend.router, prefix="/api/v1")
 app.include_router(personalization.router, prefix="/api/v1")
 
 
+@app.options("/{full_path:path}", include_in_schema=False)
+async def cors_preflight(full_path: str, request: Request) -> JSONResponse:
+    """
+    Defensive CORS preflight handler for OPTIONS requests.
+
+    Returns a 200 OK with the appropriate CORS headers so that browsers can
+    complete the preflight even if it reaches a route not explicitly defined.
+    The Starlette CORSMiddleware normally handles this, but this fallback
+    guarantees a non-400 response for preflight to allowed origins.
+    """
+    origin = request.headers.get("origin", "")
+    allowed = (
+        settings.CORS_ORIGINS
+        if isinstance(settings.CORS_ORIGINS, list)
+        else [o.strip() for o in settings.CORS_ORIGINS.split(",")]
+    )
+    response = JSONResponse(status_code=status.HTTP_200_OK, content={})
+    if origin and origin in allowed:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    if settings.CORS_ALLOW_CREDENTIALS:
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
+
 @app.get("/", include_in_schema=False)
 async def root_redirect():
     """Root redirect returning basic metadata and API documentation link."""

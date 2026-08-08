@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # Trusted Hosts (Host header allowlist)
     ALLOWED_HOSTS: Union[List[str], str] = [
         "bitebrew.netlify.app",
+        "bite-brew-menu-recommendation-system.onrender.com",
         "localhost",
         "127.0.0.1",
         "0.0.0.0",
