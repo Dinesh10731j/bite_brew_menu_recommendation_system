@@ -1,0 +1,97 @@
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.api.v1 import health, recommend
+from app.core.config import settings
+from app.core.database import close_db_pool, init_db_pool
+from app.core.logger import logger
+from app.core.redis import close_redis, init_redis
+from app.models.embedder import TextEmbedder
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager handling startup and shutdown events.
+    - Pre-loads SentenceTransformers ML model singleton into memory.
+    - Opens Neon PostgreSQL database connection pool.
+    - Opens Upstash Redis connection pool.
+    - Gracefully cleans up connection pools on termination.
+    """
+    logger.info(f"Starting {settings.APP_NAME} in environment '{settings.APP_ENV}'...")
+
+    # 1. Pre-load ML Model Singleton
+    try:
+        TextEmbedder.initialize_on_startup()
+    except Exception as e:
+        logger.error(f"Error during ML model pre-loading: {str(e)}")
+
+    # 2. Initialize Database Connection Pool
+    try:
+        await init_db_pool()
+    except Exception as e:
+        logger.error(f"Error during database pool initialization: {str(e)}")
+
+    # 3. Initialize Redis Connection Pool
+    try:
+        await init_redis()
+    except Exception as e:
+        logger.error(f"Error during Redis initialization: {str(e)}")
+
+    logger.info("Application startup sequence complete.")
+    yield
+
+    # 4. Shutdown & Cleanup
+    logger.info("Initiating application shutdown sequence...")
+    await close_db_pool()
+    await close_redis()
+    logger.info("Application shutdown complete.")
+
+
+# Initialize FastAPI application
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="Production-grade AI Menu Recommendation microservice using FastAPI, Neon PostgreSQL (pgvector) & Upstash Redis",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    lifespan=lifespan,
+)
+
+# CORS Configuration for MERN Stack Integration (Express / React)
+origins = (
+    settings.CORS_ORIGINS
+    if isinstance(settings.CORS_ORIGINS, list)
+    else [o.strip() for o in settings.CORS_ORIGINS.split(",")]
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include API Route Modules
+app.include_router(health.router, prefix="/api/v1")
+app.include_router(recommend.router, prefix="/api/v1")
+
+
+@app.get("/", include_in_schema=False)
+async def root_redirect():
+    """Root redirect returning basic metadata and API documentation link."""
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "app_name": settings.APP_NAME,
+            "version": "0.1.0",
+            "status": "running",
+            "docs": "/docs",
+            "health": "/api/v1/health",
+            "recommend_endpoint": "/api/v1/recommend",
+        },
+    )
