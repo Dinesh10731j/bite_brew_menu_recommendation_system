@@ -31,11 +31,11 @@ class RecommendationRequest(BaseModel):
         examples=["Veg", "Chicken", "Tea"],
     )
     top_n: int = Field(
-        default=3,
+        default=10,
         ge=1,
         le=50,
         description="Number of top matching recommendations to return.",
-        examples=[3],
+        examples=[10],
     )
 
     @field_validator("user_craving", mode="before")
@@ -52,5 +52,10 @@ class RecommendationRequest(BaseModel):
     def sanitize_category(cls, v: Optional[str]) -> Optional[str]:
         if v and isinstance(v, str):
             v = v.strip()
-            return v if v else None
+            if not v:
+                return None
+            normalized = v.lower()
+            if normalized in {"all", "all categories", "all-categories", "all_categories"}:
+                return None
+            return v
         return v

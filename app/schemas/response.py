@@ -72,6 +72,10 @@ class RecommendationResponse(BaseModel):
     """
 
     status: str = Field(default="success", description="Response status message")
+    source: str = Field(
+        default="ai_recommendation",
+        description="Data source type: ai_recommendation or full_catalog",
+    )
     query_craving: str = Field(..., description="Original user craving query echo")
     filters_applied: RecommendationFiltersApplied = Field(
         ..., description="Summary of applied database pre-filters"
@@ -82,6 +86,32 @@ class RecommendationResponse(BaseModel):
     )
     cached: bool = Field(
         default=False, description="Flag indicating if response was served from Upstash Redis cache"
+    )
+
+
+class MenuCatalogResponse(BaseModel):
+    """Full dynamic menu catalog returned from the database without AI ranking."""
+
+    status: str = Field(default="success", description="Response status message")
+    source: str = Field(
+        default="full_catalog",
+        description="Data source type: ai_recommendation or full_catalog",
+    )
+    query_craving: str = Field(
+        default="",
+        description="Empty for catalog responses; used only for AI recommendation requests.",
+    )
+    filters_applied: RecommendationFiltersApplied = Field(
+        default_factory=RecommendationFiltersApplied,
+        description="Summary of applied database pre-filters",
+    )
+    total_matches: int = Field(..., description="Number of menu items returned")
+    recommendations: List[DishRecommendation] = Field(
+        ..., description="Dynamic full catalog menu items from the database"
+    )
+    cached: bool = Field(
+        default=False,
+        description="Flag indicating whether the response was served from cache",
     )
 
 

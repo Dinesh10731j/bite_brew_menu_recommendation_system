@@ -52,6 +52,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Content-Security-Policy
         if settings.CSP_ENABLED:
+            # NOTE: CSP is distinct from CORS. This CSP governs what resources
+            # THIS backend's responses may load/connect-to. It does NOT block
+            # the browser's cross-origin preflight — that is handled by the
+            # CORSMiddleware. Keep connect-src aligned with the frontend origin
+            # in CSP_CONNECT_SRC so the Netlify frontend's fetch() calls are
+            # permitted by the security header policy.
             csp = (
                 f"default-src {settings.CSP_DEFAULT_SRC}; "
                 f"connect-src {settings.CSP_CONNECT_SRC}; "

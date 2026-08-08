@@ -1,6 +1,41 @@
 import pytest
 from httpx import AsyncClient
 
+from app.schemas.request import RecommendationRequest
+
+
+def test_recommendation_default_top_n_is_not_limited_to_three():
+    """Default requests should allow a larger database-backed result set."""
+    request = RecommendationRequest(user_craving="something cozy and savory")
+    assert request.top_n == 10
+
+
+def test_recommendation_all_categories_is_not_applied_as_filter():
+    """The UI's 'All Categories' value should be treated as no filter."""
+    request = RecommendationRequest(
+        user_craving="something cozy and savory",
+        category="All Categories",
+    )
+    assert request.category is None
+
+
+@pytest.mark.asyncio
+async def test_menu_catalog_success(client: AsyncClient):
+    """Test the full dynamic menu catalog endpoint for the non-AI menu view."""
+    response = await client.get("/api/v1/menu?top_n=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["source"] == "full_catalog"
+    assert isinstance(data["recommendations"], list)
+    assert len(data["recommendations"]) <= 5
+
+    if data["recommendations"]:
+        first = data["recommendations"][0]
+        assert "id" in first
+        assert "name" in first
+        assert "price" in first
+
 
 @pytest.mark.asyncio
 async def test_recommendation_success(client: AsyncClient):
@@ -15,6 +50,7 @@ async def test_recommendation_success(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "success"
+    assert data["source"] == "ai_recommendation"
     assert data["query_craving"] == payload["user_craving"]
     assert data["filters_applied"]["max_price"] == 25.00
     assert data["filters_applied"]["category"] == "Veg"

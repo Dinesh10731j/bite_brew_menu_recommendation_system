@@ -1,4 +1,5 @@
-from typing import List, Union
+import json
+from typing import List, Optional, Union
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -27,6 +28,14 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # CORS Configuration
+    # NOTE: The field type intentionally uses Union[List[str], str] rather than a
+    # bare List[str]. Pydantic Settings V2 pre-runs json.loads() on complex-typed
+    # (List) fields before the mode="before" validator runs, which would raise a
+    # SettingsError for a plain comma-separated value like
+    #   "http://localhost:3000,https://bitebrew.netlify.app"
+    # (not valid JSON). The Union keeps the field from being treated as a
+    # complex/JSON-only type, so comma-separated AND JSON-array environment
+    # overrides both reach _parse_list_env() and are normalized to List[str].
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:3000",
         "http://localhost:5173",
@@ -36,6 +45,7 @@ class Settings(BaseSettings):
     CORS_ALLOW_CREDENTIALS: bool = False
 
     # Trusted Hosts (Host header allowlist)
+    # Overridable via JSON array or comma-separated string, same as CORS_ORIGINS.
     ALLOWED_HOSTS: Union[List[str], str] = [
         "bitebrew.netlify.app",
         "bite-brew-menu-recommendation-system.onrender.com",
@@ -122,19 +132,48 @@ class Settings(BaseSettings):
         description="Rate limit for the health/readiness probe.",
     )
 
+    @staticmethod
+    def _parse_list_env(v: Union[str, List[str]]) -> List[str]:
+        """
+        Normalize an environment-provided list value into a Python List[str].
+
+        Supports both accepted syntaxes for provider overrides:
+          - JSON array string:  '["http://localhost:3000","https://bitebrew.netlify.app"]'
+          - comma-separated:    'http://localhost:3000,https://bitebrew.netlify.app'
+          - already a list passed programmatically.
+        """
+        if isinstance(v, str):
+            candidate = v.strip()
+            # Trim surrounding quotes if the whole value is wrapped in them.
+            if (
+                len(candidate) >= 2
+                and candidate[0] == candidate[-1]
+                and candidate[0] in ('"', "'")
+            ):
+                candidate = candidate[1:-1].strip()
+            # JSON array form
+            if candidate.startswith("[") and candidate.endswith("]"):
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            # Comma-separated form (fallback)
+            return [item.strip() for item in candidate.split(",") if item.strip()]
+        if isinstance(v, (list, tuple, set)):
+            return [str(item).strip() for item in v if str(item).strip()]
+        raise ValueError(f"Cannot parse list value from {v!r}")
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+        return cls._parse_list_env(v)
 
     @field_validator("ALLOWED_HOSTS", mode="before")
     @classmethod
     def parse_allowed_hosts(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str):
-            return [host.strip() for host in v.split(",") if host.strip()]
-        return v
+        return cls._parse_list_env(v)
 
 
 # Instantiated global settings singleton

@@ -69,10 +69,27 @@ class RecommendationService:
 
         dishes_data: List[Dict[str, Any]] = []
 
-        # 2. Encode user craving text into 384-dimensional vector embedding
+        # 2. Ensure newly added menu items have embeddings before similarity search.
+        if self.db_conn is not None:
+            try:
+                repo = MenuRepository(self.db_conn)
+                missing_items = await repo.get_dishes_missing_embeddings(limit=500)
+                if missing_items:
+                    logger.info(
+                        f"Syncing {len(missing_items)} newly added menu items without embeddings before recommendation search."
+                    )
+                    for item in missing_items:
+                        text = item.get("description") or item.get("name") or ""
+                        if text:
+                            vector = self.embedder.encode_text(text)
+                            await repo.update_item_embedding(item["id"], vector)
+            except Exception as e:
+                logger.warning(f"Automatic embedding sync failed before recommendation query: {str(e)}")
+
+        # 3. Encode user craving text into 384-dimensional vector embedding
         query_vector = self.embedder.encode_text(request.user_craving)
 
-        # 3. Execute pgvector search query against Neon PostgreSQL database
+        # 4. Execute pgvector search query against Neon PostgreSQL database
         if self.db_conn is not None:
             try:
                 repo = MenuRepository(self.db_conn)
@@ -94,6 +111,7 @@ class RecommendationService:
 
         response = RecommendationResponse(
             status="success",
+            source="ai_recommendation",
             query_craving=request.user_craving,
             filters_applied=RecommendationFiltersApplied(
                 max_price=request.max_price,

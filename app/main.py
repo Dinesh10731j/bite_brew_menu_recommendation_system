@@ -66,18 +66,25 @@ app = FastAPI(
 )
 
 # CORS Configuration for MERN Stack Integration (Express / React)
+# The settings validator already normalizes CORS_ORIGINS / ALLOWED_HOSTS to a
+# list regardless of whether they came from a Python default, a comma-separated
+# env string, or a JSON-array env string. The isinstance guards below are a
+# defensive fallback so the middleware never receives a raw string.
 origins = (
     settings.CORS_ORIGINS
     if isinstance(settings.CORS_ORIGINS, list)
-    else [o.strip() for o in settings.CORS_ORIGINS.split(",")]
+    else [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 )
 
 # Trusted Host Header Allowlist (mirrors production frontend + localhost)
 allowed_hosts = (
     settings.ALLOWED_HOSTS
     if isinstance(settings.ALLOWED_HOSTS, list)
-    else [h.strip() for h in settings.ALLOWED_HOSTS.split(",")]
+    else [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
 )
+
+logger.info("Configured CORS origins: %s", origins)
+logger.info("Configured allowed hosts: %s", allowed_hosts)
 
 # NOTE: Starlette builds its middleware stack in LIFO order — middleware added
 # LAST runs FIRST (outermost) on incoming requests. To ensure CORSMiddleware
@@ -93,7 +100,9 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "content-type"],
+    # Long-lived preflight cache (CORS middleware default is 600s).
+    max_age=86400,
 )
 
 
@@ -140,27 +149,29 @@ async def cors_preflight(full_path: str, request: Request) -> JSONResponse:
     guarantees a non-400 response for preflight to allowed origins.
     """
     origin = request.headers.get("origin", "")
-    allowed = (
-        settings.CORS_ORIGINS
-        if isinstance(settings.CORS_ORIGINS, list)
-        else [o.strip() for o in settings.CORS_ORIGINS.split(",")]
-    )
-    response = JSONResponse(status_code=status.HTTP_200_OK, content={})
-    # Reflect the requesting origin when it is allowlisted; otherwise fall back
-    # to the first configured origin so the response always carries a valid
-    # Access-Control-Allow-Origin header to satisfy the browser preflight.
+    # Reuse the module-level normalized origins list so the fallback handler can
+    # never drift from what the CORSMiddleware was configured with.
+    allowed = origins
+    # Only reflect an origin that is explicitly allowlisted. Never fall back to
+    # echoing an arbitrary origin: that would defeat CORS security.
     if origin and origin in allowed:
+        response = JSONResponse(status_code=status.HTTP_200_OK, content={})
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Vary"] = "Origin"
-    elif allowed:
-        response.headers["Access-Control-Allow-Origin"] = allowed[0]
-        response.headers["Vary"] = "Origin"
-    response.headers["Access-Control-Allow-Methods"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    response.headers["Access-Control-Max-Age"] = "86400"
-    if settings.CORS_ALLOW_CREDENTIALS:
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Max-Age"] = "86400"
+        if settings.CORS_ALLOW_CREDENTIALS:
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
+    # Disallowed origin: return a 400 without an Access-Control-Allow-Origin
+    # header, matching the CORSMiddleware behavior so the browser cannot
+    # proceed with the cross-origin request.
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"detail": "Disallowed CORS origin"},
+    )
 
 
 @app.get("/", include_in_schema=False)
