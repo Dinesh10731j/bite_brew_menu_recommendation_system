@@ -72,6 +72,22 @@ origins = (
     else [o.strip() for o in settings.CORS_ORIGINS.split(",")]
 )
 
+# Trusted Host Header Allowlist (mirrors production frontend + localhost)
+allowed_hosts = (
+    settings.ALLOWED_HOSTS
+    if isinstance(settings.ALLOWED_HOSTS, list)
+    else [h.strip() for h in settings.ALLOWED_HOSTS.split(",")]
+)
+
+# NOTE: Starlette builds its middleware stack in LIFO order — middleware added
+# LAST runs FIRST (outermost) on incoming requests. To ensure CORSMiddleware
+# intercepts and answers browser OPTIONS preflight requests BEFORE
+# TrustedHostMiddleware can reject them with a 400 "Invalid host header", we
+# register TrustedHostMiddleware FIRST (innermost) and CORSMiddleware AFTER it
+# (thus outermost). This keeps host validation for real GET/POST traffic while
+# letting CORS preflights succeed regardless of the Host header.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -79,14 +95,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Trusted Host Header Allowlist (mirrors production frontend + localhost)
-allowed_hosts = (
-    settings.ALLOWED_HOSTS
-    if isinstance(settings.ALLOWED_HOSTS, list)
-    else [h.strip() for h in settings.ALLOWED_HOSTS.split(",")]
-)
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 
 def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
@@ -138,11 +146,18 @@ async def cors_preflight(full_path: str, request: Request) -> JSONResponse:
         else [o.strip() for o in settings.CORS_ORIGINS.split(",")]
     )
     response = JSONResponse(status_code=status.HTTP_200_OK, content={})
+    # Reflect the requesting origin when it is allowlisted; otherwise fall back
+    # to the first configured origin so the response always carries a valid
+    # Access-Control-Allow-Origin header to satisfy the browser preflight.
     if origin and origin in allowed:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Vary"] = "Origin"
+    elif allowed:
+        response.headers["Access-Control-Allow-Origin"] = allowed[0]
+        response.headers["Vary"] = "Origin"
     response.headers["Access-Control-Allow-Methods"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Max-Age"] = "86400"
     if settings.CORS_ALLOW_CREDENTIALS:
         response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
