@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
 from app.core.config import settings
 from app.core.database import check_db_health
+from app.core.rate_limit import limiter
 from app.core.redis import check_redis_health
 from app.models.embedder import TextEmbedder
 from app.schemas.response import HealthCheckResponse
@@ -17,7 +18,8 @@ router = APIRouter(tags=["Health"])
     summary="System Health & Readiness Probe",
     description="Returns operational health of service, including Neon PostgreSQL, Upstash Redis, and ML embedding singleton states.",
 )
-async def health_check() -> HealthCheckResponse:
+@limiter.limit(settings.HEALTH_RATE_LIMIT)
+async def health_check(request: Request) -> HealthCheckResponse:
     """
     Health check endpoint for container orchestrators and monitoring probes.
     """

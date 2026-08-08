@@ -1,13 +1,17 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
-from app.api.v1 import health, recommend
+from app.api.v1 import health, personalization, recommend
 from app.core.config import settings
 from app.core.database import close_db_pool, init_db_pool
 from app.core.logger import logger
+from app.core.rate_limit import limiter
 from app.core.redis import close_redis, init_redis
+from app.core.security import SecurityHeadersMiddleware
 from app.models.embedder import TextEmbedder
 
 
@@ -71,14 +75,50 @@ origins = (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Trusted Host Header Allowlist (mirrors production frontend + localhost)
+allowed_hosts = (
+    settings.ALLOWED_HOSTS
+    if isinstance(settings.ALLOWED_HOSTS, list)
+    else [h.strip() for h in settings.ALLOWED_HOSTS.split(",")]
+)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """Return a standardized 429 Too Many Requests response."""
+    logger.warning(
+        "Rate limit exceeded for %s from %s",
+        request.url.path,
+        request.client.host if request.client else "unknown",
+    )
+    response = JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "status": "error",
+            "detail": "Too many requests. Please slow down and try again later.",
+        },
+    )
+    response.headers["Retry-After"] = str(exc.detail)
+    return response
+
+
+# Register slowapi rate-limit exception handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+
+
+if settings.ENABLE_SECURITY_HEADERS:
+    app.add_middleware(SecurityHeadersMiddleware)
+
 # Include API Route Modules
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(recommend.router, prefix="/api/v1")
+app.include_router(personalization.router, prefix="/api/v1")
 
 
 @app.get("/", include_in_schema=False)

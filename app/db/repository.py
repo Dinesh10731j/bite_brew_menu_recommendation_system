@@ -24,12 +24,14 @@ class MenuRepository:
         self,
         query_vector: List[float],
         max_price: Optional[float] = None,
-        is_vegetarian: Optional[bool] = None,
+        category: Optional[str] = None,
         top_n: int = 3,
     ) -> List[Dict[str, Any]]:
         """
         Performs hybrid vector similarity search using pgvector's Euclidean L2 distance operator (<->),
-        combining vector indexing with price and dietary pre-filters.
+        combining vector indexing with optional category name and price pre-filters.
+        Category filter is case-insensitive and partial-match. The response's 'category' field is built
+        as an object {id, name} by LEFT JOINing the relational 'categories' table on menu_items."categoryId".
         """
         vector_str = self._format_vector(query_vector)
 
@@ -42,33 +44,41 @@ class MenuRepository:
             where_clauses.append("price::numeric <= %s")
             params.append(max_price)
 
-        if is_vegetarian is not None:
-            # COALESCE treats NULL is_vegetarian as TRUE (vegetarian-safe)
-            # so vegetarian filter never excludes NULL rows
-            where_clauses.append("COALESCE(is_vegetarian, TRUE) = %s")
-            params.append(is_vegetarian)
+        if category:
+            # Case-insensitive partial match against the category name.
+            # Match against the JOINed categories.name (preferred) and menu_items.category as fallback.
+            where_clauses.append(
+                "(COALESCE(c.name, menu_items.category) ILIKE %s OR menu_items.category ILIKE %s)"
+            )
+            like_pattern = f"%{category}%"
+            params.append(like_pattern)
+            params.append(like_pattern)
 
         where_sql = " AND ".join(where_clauses)
         params.append(top_n)
 
-        # SQL Query selecting dishes ordered by pgvector L2 distance operator (<->)
+        # SQL Query selecting dishes ordered by pgvector L2 distance operator (<->).
+        # LEFT JOIN categories so we can surface the category id + name in the response.
         sql = f"""
             SELECT 
-                id,
-                name,
-                description,
-                price,
-                image,
-                image_url,
-                category,
-                "categoryId",
-                available,
-                featured,
-                discount,
-                popularity,
-                is_vegetarian,
-                (embedding <-> %s::vector) AS distance
+                menu_items.id,
+                menu_items.name,
+                menu_items.description,
+                menu_items.price,
+                menu_items.image,
+                menu_items.image_url,
+                menu_items.category,
+                menu_items."categoryId",
+                menu_items.available,
+                menu_items.featured,
+                menu_items.discount,
+                menu_items.popularity,
+                menu_items.is_vegetarian,
+                c.id AS cat_id,
+                c.name AS cat_name,
+                (menu_items.embedding <-> %s::vector) AS distance
             FROM menu_items
+            LEFT JOIN categories c ON c.id = menu_items."categoryId"
             WHERE {where_sql}
             ORDER BY distance ASC
             LIMIT %s;
@@ -99,6 +109,23 @@ class MenuRepository:
                     raw_discount = row.get("discount")
                     parsed_discount = float(raw_discount) if raw_discount is not None else 0.0
 
+                    # Build category as an object {id, name} from the JOINed categories table.
+                    # Falls back to the plain menu_items.category string when no join row exists.
+                    joined_cat_id = row.get("cat_id")
+                    joined_cat_name = row.get("cat_name")
+                    if joined_cat_id is not None or joined_cat_name is not None:
+                        category_obj = {
+                            "id": (
+                                str(joined_cat_id)
+                                if isinstance(joined_cat_id, UUID)
+                                else joined_cat_id
+                            ),
+                            "name": joined_cat_name,
+                            "description": None,
+                        }
+                    else:
+                        category_obj = row.get("category")
+
                     results.append({
                         "id": dish_id,
                         "name": row["name"],
@@ -106,7 +133,7 @@ class MenuRepository:
                         "price": parsed_price,
                         "image": img_src,
                         "image_url": img_src,
-                        "category": row.get("category"),
+                        "category": category_obj,
                         "categoryId": cat_id,
                         "available": bool(row.get("available")) if row.get("available") is not None else True,
                         "featured": bool(row.get("featured")) if row.get("featured") is not None else False,

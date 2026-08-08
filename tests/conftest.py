@@ -25,7 +25,13 @@ def init_embedder():
 async def client() -> AsyncGenerator[AsyncClient, None]:
     """
     Async HTTP client fixture wrapping the FastAPI application.
+    Sets an explicit Host header that matches the TrustedHostMiddleware
+    allowlist (the ASGI test host 'testserver' is not in ALLOWED_HOSTS).
     """
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://localhost",
+        headers={"Host": "localhost"},
+    ) as ac:
         yield ac

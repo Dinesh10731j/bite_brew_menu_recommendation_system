@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.deps import get_recommendation_service
+from app.core.config import settings
 from app.core.logger import logger
+from app.core.rate_limit import limiter
 from app.schemas.request import RecommendationRequest
 from app.schemas.response import RecommendationResponse
 from app.services.recommendation import RecommendationService
@@ -19,7 +21,9 @@ router = APIRouter(tags=["Recommendations"])
         "executing pgvector similarity search (<-> operator) combined with price and dietary pre-filters."
     ),
 )
+@limiter.limit(settings.RECOMMEND_RATE_LIMIT)
 async def get_menu_recommendations(
+    request: Request,
     payload: RecommendationRequest,
     service: RecommendationService = Depends(get_recommendation_service),
 ) -> RecommendationResponse:

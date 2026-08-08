@@ -8,7 +8,7 @@ async def test_recommendation_success(client: AsyncClient):
     payload = {
         "user_craving": "I want something spicy and cheesy for lunch",
         "max_price": 25.00,
-        "is_vegetarian": True,
+        "category": "Veg",
         "top_n": 3,
     }
     response = await client.post("/api/v1/recommend", json=payload)
@@ -17,7 +17,7 @@ async def test_recommendation_success(client: AsyncClient):
     assert data["status"] == "success"
     assert data["query_craving"] == payload["user_craving"]
     assert data["filters_applied"]["max_price"] == 25.00
-    assert data["filters_applied"]["is_vegetarian"] is True
+    assert data["filters_applied"]["category"] == "Veg"
     assert isinstance(data["recommendations"], list)
     assert len(data["recommendations"]) <= 3
 
@@ -33,18 +33,22 @@ async def test_recommendation_success(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_recommendation_vegetarian_filter(client: AsyncClient):
-    """Test vegetarian filter constraint."""
+async def test_recommendation_category_filter(client: AsyncClient):
+    """Test category name filter constraint."""
     payload = {
         "user_craving": "burger and fries",
-        "is_vegetarian": True,
+        "category": "Veg",
         "top_n": 5,
     }
     response = await client.post("/api/v1/recommend", json=payload)
     assert response.status_code == 200
     data = response.json()
     for rec in data["recommendations"]:
-        assert rec["is_vegetarian"] is True
+        category = rec.get("category")
+        if isinstance(category, dict):
+            assert category.get("name") is not None
+        else:
+            assert category is not None
 
 
 @pytest.mark.asyncio

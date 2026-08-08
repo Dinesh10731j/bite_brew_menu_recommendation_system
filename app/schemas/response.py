@@ -63,7 +63,7 @@ class RecommendationFiltersApplied(BaseModel):
     """Echo of active pre-filters applied to the recommendation query."""
 
     max_price: Optional[float] = None
-    is_vegetarian: Optional[bool] = None
+    category: Optional[str] = None
 
 
 class RecommendationResponse(BaseModel):

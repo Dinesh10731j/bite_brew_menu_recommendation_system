@@ -36,7 +36,7 @@ class RecommendationService:
         raw_key = (
             f"{request.user_craving.strip().lower()}:"
             f"{request.max_price}:"
-            f"{request.is_vegetarian}:"
+            f"{request.category}:"
             f"{request.top_n}"
         )
         hashed = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
@@ -64,7 +64,7 @@ class RecommendationService:
 
         logger.info(
             f"Cache MISS for key={cache_key}. Computing recommendations for craving='{request.user_craving}' | "
-            f"max_price={request.max_price} | is_veg={request.is_vegetarian} | top_n={request.top_n}"
+            f"max_price={request.max_price} | category={request.category} | top_n={request.top_n}"
         )
 
         dishes_data: List[Dict[str, Any]] = []
@@ -79,7 +79,7 @@ class RecommendationService:
                 dishes_data = await repo.search_dishes_by_vector(
                     query_vector=query_vector,
                     max_price=request.max_price,
-                    is_vegetarian=request.is_vegetarian,
+                    category=request.category,
                     top_n=request.top_n,
                 )
             except Exception as e:
@@ -97,7 +97,7 @@ class RecommendationService:
             query_craving=request.user_craving,
             filters_applied=RecommendationFiltersApplied(
                 max_price=request.max_price,
-                is_vegetarian=request.is_vegetarian,
+                category=request.category,
             ),
             total_matches=len(recommendations),
             recommendations=recommendations,

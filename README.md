@@ -188,3 +188,40 @@ Build and run using Docker:
 docker build -t bite-brew-ai-service .
 docker run -p 8000:8000 --env-file .env bite-brew-ai-service
 ```
+
+---
+
+## 🔐 Production Security Features
+
+The microservice ships with production-grade security out of the box:
+
+### HTTP Security Headers (Helmet-style custom middleware)
+Automatically injects hardened response headers, including:
+- **Strict-Transport-Security** (HSTS) with configurable max-age, subdomains and preload.
+- **X-Frame-Options: DENY** (frame/clickjacking protection).
+- **X-Content-Type-Options: nosniff**.
+- **Content-Security-Policy** (CSP) restricting loaded resources to the app origin.
+- **Referrer-Policy** and **Permissions-Policy** limiting what the frontend can access.
+
+Toggle via `ENABLE_SECURITY_HEADERS` and tune CSP via `CSP_ENABLED` / `CSP_DEFAULT_SRC` / `CSP_CONNECT_SRC`. When `DEBUG=false` (production), HTTPS redirects are enforced.
+
+### Rate Limiting (`slowapi`)
+Per-IP rate limiting to protect expensive AI endpoints from abuse:
+- Global default limit via `DEFAULT_RATE_LIMIT`.
+- Endpoint-specific limits:
+  - `POST /api/v1/recommend` → `RECOMMEND_RATE_LIMIT` (e.g. `60/minute`)
+  - `GET .../users/{id}/recommendations` → `PERSONALIZED_RECOMMEND_RATE_LIMIT`
+  - `POST .../events` → `EVENT_RATE_LIMIT`
+  - `POST .../orders` → `ORDER_RATE_LIMIT`
+  - `GET /api/v1/health` → `HEALTH_RATE_LIMIT`
+
+Exceeding a limit returns **429 Too Many Requests** with a `Retry-After` header.
+
+> **Multi-worker note:** When `REDIS_URL` is set, limits are shared across all workers (recommended for production). Without Redis the limiter falls back to a per-process in-memory store.
+
+### CORS + TrustedHost
+- `CORS_ORIGINS` includes `https://bitebrew.netlify.app` for the production frontend, plus localhost origins for local development.
+- `ALLOWED_HOSTS` whitelists trusted `Host` headers to prevent DNS rebinding attacks.
+
+### Configuration
+All security features are configurable through environment variables (see `.env.example`).

@@ -8,11 +8,29 @@ from app.schemas.response import (
     RecommendationResponse,
     HealthCheckResponse,
 )
+from app.schemas.personalization import (
+    UserEventRequest,
+    UserOrderRequest,
+    UserOrderItem,
+    PersonalizedRecommendationRequest,
+    PersonalizedRecommendationResponse,
+    UserPreferenceSummary,
+    EventProcessedResponse,
+    OrderProcessedResponse,
+)
 
 __all__ = [
     "RecommendationRequest",
     "DishRecommendation",
     "RecommendationResponse",
     "HealthCheckResponse",
+    "UserEventRequest",
+    "UserOrderRequest",
+    "UserOrderItem",
+    "PersonalizedRecommendationRequest",
+    "PersonalizedRecommendationResponse",
+    "UserPreferenceSummary",
+    "EventProcessedResponse",
+    "OrderProcessedResponse",
 ]
 

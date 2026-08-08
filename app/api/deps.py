@@ -7,6 +7,7 @@ from app.core.database import DatabasePoolManager
 from app.core.logger import logger
 from app.models.embedder import TextEmbedder, get_embedder
 from app.services.recommendation import RecommendationService
+from app.services.personalization import PersonalizationService
 
 
 async def get_db_connection_dep() -> AsyncGenerator[Optional[AsyncConnection], None]:
@@ -36,6 +37,16 @@ def get_recommendation_service(
     FastAPI dependency injecting initialized RecommendationService instance.
     """
     return RecommendationService(embedder=embedder, db_conn=db_conn)
+
+
+def get_personalization_service(
+    embedder: TextEmbedder = Depends(get_embedder),
+    db_conn: Optional[AsyncConnection] = Depends(get_db_connection_dep),
+) -> PersonalizationService:
+    """
+    FastAPI dependency injecting initialized PersonalizationService instance.
+    """
+    return PersonalizationService(embedder=embedder, db_conn=db_conn)
 
 
 async def verify_api_key(

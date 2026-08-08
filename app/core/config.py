@@ -31,6 +31,16 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:3000",
+        "https://bitebrew.netlify.app",
+    ]
+    CORS_ALLOW_CREDENTIALS: bool = False
+
+    # Trusted Hosts (Host header allowlist)
+    ALLOWED_HOSTS: Union[List[str], str] = [
+        "bitebrew.netlify.app",
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
     ]
 
     # Database Configuration (Neon PostgreSQL)
@@ -63,11 +73,66 @@ class Settings(BaseSettings):
     # Security Configuration
     API_KEY_SECRET: str = "dev-secret-key-12345"
 
+    # HTTP Security Headers (Helmet) Configuration
+    ENABLE_SECURITY_HEADERS: bool = Field(
+        default=True,
+        description="Enable Talisman HTTP security headers (Helmet for FastAPI).",
+    )
+    HSTS_MAX_AGE: int = Field(
+        default=31536000,
+        description="Strict-Transport-Security max-age in seconds (1 year default).",
+    )
+    HSTS_INCLUDE_SUBDOMAINS: bool = True
+    HSTS_PRELOAD: bool = True
+    CSP_ENABLED: bool = Field(
+        default=True,
+        description="Enable strict Content-Security-Policy header.",
+    )
+    CSP_DEFAULT_SRC: str = "'self'"
+    CSP_CONNECT_SRC: str = "'self' https://bitebrew.netlify.app"
+
+    # Rate Limiting Configuration
+    RATE_LIMIT_ENABLED: bool = Field(
+        default=True,
+        description="Globally enable or disable API rate limiting.",
+    )
+    DEFAULT_RATE_LIMIT: str = Field(
+        default="100/minute",
+        description="Global default rate limit applied to all requests.",
+    )
+    RECOMMEND_RATE_LIMIT: str = Field(
+        default="60/minute",
+        description="Per-IP rate limit for the expensive /recommend endpoint.",
+    )
+    PERSONALIZED_RECOMMEND_RATE_LIMIT: str = Field(
+        default="60/minute",
+        description="Per-IP rate limit for personalized recommendations.",
+    )
+    EVENT_RATE_LIMIT: str = Field(
+        default="120/minute",
+        description="Per-IP rate limit for capturing user behavior events.",
+    )
+    ORDER_RATE_LIMIT: str = Field(
+        default="30/minute",
+        description="Per-IP rate limit for recording user orders.",
+    )
+    HEALTH_RATE_LIMIT: str = Field(
+        default="30/second",
+        description="Rate limit for the health/readiness probe.",
+    )
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    @field_validator("ALLOWED_HOSTS", mode="before")
+    @classmethod
+    def parse_allowed_hosts(cls, v: Union[str, List[str]]) -> List[str]:
+        if isinstance(v, str):
+            return [host.strip() for host in v.split(",") if host.strip()]
         return v
 
 
