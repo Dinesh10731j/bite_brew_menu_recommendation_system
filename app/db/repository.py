@@ -275,20 +275,44 @@ class MenuRepository:
             logger.error(f"Error fetching items missing embeddings: {str(e)}")
             return []
 
-    async def update_item_embedding(self, item_id: Any, vector: List[float]) -> bool:
-        """
-        Updates the vector embedding column for a specific menu item.
-        """
-        vector_str = self._format_vector(vector)
+    async def _column_exists(self, table_name: str, column_name: str) -> bool:
+        """Checks whether a specific column exists on the menu_items table."""
         sql = """
-            UPDATE menu_items
-            SET embedding = %s::vector,
-                updated_at = NOW()
-            WHERE id = %s;
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = %s
+                  AND column_name = %s
+            );
         """
         try:
             async with self.conn.cursor() as cur:
-                await cur.execute(sql, [vector_str, item_id])
+                await cur.execute(sql, [table_name, column_name])
+                row = await cur.fetchone()
+                return bool(row[0]) if row else False
+        except Exception as e:
+            logger.warning(f"Unable to check column existence for {table_name}.{column_name}: {str(e)}")
+            return False
+
+    async def update_item_embedding(self, item_id: Any, vector: List[float]) -> bool:
+        """
+        Updates the vector embedding column for a specific menu item.
+        Handles legacy databases where the updated_at column is missing.
+        """
+        vector_str = self._format_vector(vector)
+        has_updated_at = await self._column_exists("menu_items", "updated_at")
+
+        sql = "UPDATE menu_items SET embedding = %s::vector"
+        params: List[Any] = [vector_str]
+        if has_updated_at:
+            sql += ", updated_at = NOW()"
+        sql += " WHERE id = %s;"
+        params.append(item_id)
+
+        try:
+            async with self.conn.cursor() as cur:
+                await cur.execute(sql, params)
                 await self.conn.commit()
                 return cur.rowcount > 0
         except Exception as e:

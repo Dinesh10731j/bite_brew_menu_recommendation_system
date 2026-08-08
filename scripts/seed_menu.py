@@ -133,6 +133,7 @@ async def seed_database() -> None:
                     ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS is_vegetarian BOOLEAN DEFAULT FALSE;
                     ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS image_url TEXT;
                     ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS embedding vector(384);
+                    ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
                 """)
 
                 # 4. Remove NOT NULL constraint on legacy categoryId column if present
