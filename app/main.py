@@ -5,6 +5,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
+from app.ai_command_center.router import router as ai_router
 from app.api.v1 import health, personalization, recommend
 from app.core.config import settings
 from app.core.database import close_db_pool, init_db_pool
@@ -136,6 +137,7 @@ if settings.ENABLE_SECURITY_HEADERS:
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(recommend.router, prefix="/api/v1")
 app.include_router(personalization.router, prefix="/api/v1")
+app.include_router(ai_router)
 
 
 @app.options("/{full_path:path}", include_in_schema=False)
@@ -186,5 +188,6 @@ async def root_redirect():
             "docs": "/docs",
             "health": "/api/v1/health",
             "recommend_endpoint": "/api/v1/recommend",
+            "ai_command_center": "/api/ai/command-center",
         },
     )
