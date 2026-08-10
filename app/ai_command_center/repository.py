@@ -27,6 +27,20 @@ class AIRepository:
             return False
 
     @staticmethod
+    async def _resolve_order_table(conn: Optional[AsyncConnection]) -> str:
+        for table_name in ("user_orders", "orders"):
+            if await AIRepository.table_exists(conn, table_name):
+                return table_name
+        return "orders"
+
+    @staticmethod
+    async def _resolve_order_items_table(conn: Optional[AsyncConnection]) -> Optional[str]:
+        for table_name in ("user_order_items", "order_items"):
+            if await AIRepository.table_exists(conn, table_name):
+                return table_name
+        return None
+
+    @staticmethod
     async def get_metric_summary(conn: Optional[AsyncConnection]) -> Dict[str, Any]:
         snapshot = await AIRepository.get_business_snapshot(conn)
         summary = {
@@ -59,9 +73,12 @@ class AIRepository:
         if conn is None:
             return snapshot
 
-        for table in ("menu_items", "orders", "order_items", "staff", "loyalty_accounts"):
+        for table in ("menu_items", "orders", "order_items", "user_orders", "user_order_items", "staff", "loyalty_accounts"):
             if await AIRepository.table_exists(conn, table):
                 snapshot["tables"].append(table)
+
+        order_table = await AIRepository._resolve_order_table(conn)
+        order_items_table = await AIRepository._resolve_order_items_table(conn)
 
         try:
             async with conn.cursor() as cur:
@@ -74,7 +91,10 @@ class AIRepository:
 
         try:
             async with conn.cursor() as cur:
-                await cur.execute('SELECT COUNT(*) FROM public."orders"')
+                if order_table == "user_orders":
+                    await cur.execute('SELECT COUNT(*) FROM public."user_orders"')
+                else:
+                    await cur.execute('SELECT COUNT(*) FROM public."orders"')
                 row = await cur.fetchone()
                 if row:
                     snapshot["orders"] = int(row[0] or 0)
@@ -83,7 +103,10 @@ class AIRepository:
 
         try:
             async with conn.cursor() as cur:
-                await cur.execute('SELECT COALESCE(SUM("totalPrice"), 0) FROM public."orders" WHERE "totalPrice" > 0')
+                if order_table == "user_orders":
+                    await cur.execute('SELECT COALESCE(SUM("total"), 0) FROM public."user_orders" WHERE "total" > 0')
+                else:
+                    await cur.execute('SELECT COALESCE(SUM("totalPrice"), 0) FROM public."orders" WHERE "totalPrice" > 0')
                 row = await cur.fetchone()
                 value = float(row[0] or 0) if row else 0.0
                 snapshot["revenue"] = value
@@ -92,21 +115,34 @@ class AIRepository:
 
         try:
             async with conn.cursor() as cur:
-                await cur.execute('SELECT COUNT(*) FROM public."orders" WHERE "createdAt" >= NOW() - INTERVAL \'30 days\'')
-                row = await cur.fetchone()
-                if row:
-                    snapshot["recent_orders_30d"] = int(row[0] or 0)
-                await cur.execute('SELECT COALESCE(SUM("totalPrice"), 0) FROM public."orders" WHERE "totalPrice" > 0 AND "createdAt" >= NOW() - INTERVAL \'30 days\'')
-                row = await cur.fetchone()
-                if row:
-                    snapshot["recent_revenue_30d"] = float(row[0] or 0)
+                if order_table == "user_orders":
+                    await cur.execute('SELECT COUNT(*) FROM public."user_orders" WHERE "created_at" >= NOW() - INTERVAL \'30 days\'')
+                    row = await cur.fetchone()
+                    if row:
+                        snapshot["recent_orders_30d"] = int(row[0] or 0)
+                    await cur.execute('SELECT COALESCE(SUM("total"), 0) FROM public."user_orders" WHERE "total" > 0 AND "created_at" >= NOW() - INTERVAL \'30 days\'')
+                    row = await cur.fetchone()
+                    if row:
+                        snapshot["recent_revenue_30d"] = float(row[0] or 0)
+                else:
+                    await cur.execute('SELECT COUNT(*) FROM public."orders" WHERE "createdAt" >= NOW() - INTERVAL \'30 days\'')
+                    row = await cur.fetchone()
+                    if row:
+                        snapshot["recent_orders_30d"] = int(row[0] or 0)
+                    await cur.execute('SELECT COALESCE(SUM("totalPrice"), 0) FROM public."orders" WHERE "totalPrice" > 0 AND "createdAt" >= NOW() - INTERVAL \'30 days\'')
+                    row = await cur.fetchone()
+                    if row:
+                        snapshot["recent_revenue_30d"] = float(row[0] or 0)
         except Exception:
             snapshot["recent_orders_30d"] = 0
             snapshot["recent_revenue_30d"] = 0.0
 
         try:
             async with conn.cursor() as cur:
-                await cur.execute('SELECT COUNT(*) FROM public."orders" WHERE LOWER(CAST("status" AS text)) LIKE %s', ('%cancel%',))
+                if order_table == "user_orders":
+                    await cur.execute('SELECT COUNT(*) FROM public."user_orders" WHERE LOWER(CAST("status" AS text)) LIKE %s', ('%cancel%',))
+                else:
+                    await cur.execute('SELECT COUNT(*) FROM public."orders" WHERE LOWER(CAST("status" AS text)) LIKE %s', ('%cancel%',))
                 row = await cur.fetchone()
                 if row:
                     snapshot["cancelled_orders"] = int(row[0] or 0)
@@ -115,7 +151,10 @@ class AIRepository:
 
         try:
             async with conn.cursor() as cur:
-                await cur.execute('SELECT DATE("createdAt") AS day, COALESCE(SUM("totalPrice"), 0) AS revenue FROM public."orders" WHERE "createdAt" IS NOT NULL GROUP BY DATE("createdAt") ORDER BY day DESC LIMIT 7')
+                if order_table == "user_orders":
+                    await cur.execute('SELECT DATE("created_at") AS day, COALESCE(SUM("total"), 0) AS revenue FROM public."user_orders" WHERE "created_at" IS NOT NULL GROUP BY DATE("created_at") ORDER BY day DESC LIMIT 7')
+                else:
+                    await cur.execute('SELECT DATE("createdAt") AS day, COALESCE(SUM("totalPrice"), 0) AS revenue FROM public."orders" WHERE "createdAt" IS NOT NULL GROUP BY DATE("createdAt") ORDER BY day DESC LIMIT 7')
                 rows = await cur.fetchall()
                 snapshot["daily_revenue"] = [float(row[1] or 0) for row in rows]
         except Exception:
@@ -123,9 +162,14 @@ class AIRepository:
 
         try:
             async with conn.cursor() as cur:
-                await cur.execute(
-                    'SELECT mi."name", COALESCE(SUM(oi.quantity), 0) AS qty FROM public."order_items" oi JOIN public."menu_items" mi ON mi.id = oi."menuItemId" GROUP BY mi."name" ORDER BY qty DESC LIMIT 5'
-                )
+                if order_items_table == "user_order_items":
+                    await cur.execute(
+                        'SELECT mi."name", COALESCE(SUM(oi.quantity), 0) AS qty FROM public."user_order_items" oi JOIN public."menu_items" mi ON mi.id = oi."menu_item_id" GROUP BY mi."name" ORDER BY qty DESC LIMIT 5'
+                    )
+                else:
+                    await cur.execute(
+                        'SELECT mi."name", COALESCE(SUM(oi.quantity), 0) AS qty FROM public."order_items" oi JOIN public."menu_items" mi ON mi.id = oi."menuItemId" GROUP BY mi."name" ORDER BY qty DESC LIMIT 5'
+                    )
                 rows = await cur.fetchall()
                 snapshot["popular_items"] = [{"name": row[0], "qty": int(row[1] or 0)} for row in rows]
         except Exception:
@@ -156,10 +200,21 @@ class AIRepository:
     async def get_order_rows(conn: Optional[AsyncConnection], limit: int = 30) -> List[Dict[str, Any]]:
         if conn is None:
             return []
-        queries = [
-            'SELECT * FROM public."orders" ORDER BY "createdAt" DESC LIMIT %s',
-            'SELECT * FROM public."order_items" ORDER BY "id" DESC LIMIT %s',
-        ]
+
+        order_table = await AIRepository._resolve_order_table(conn)
+        order_items_table = await AIRepository._resolve_order_items_table(conn)
+        queries = []
+
+        if order_table == "user_orders":
+            queries.append('SELECT * FROM public."user_orders" ORDER BY "created_at" DESC LIMIT %s')
+        else:
+            queries.append('SELECT * FROM public."orders" ORDER BY "createdAt" DESC LIMIT %s')
+
+        if order_items_table == "user_order_items":
+            queries.append('SELECT * FROM public."user_order_items" ORDER BY "created_at" DESC LIMIT %s')
+        elif order_items_table == "order_items":
+            queries.append('SELECT * FROM public."order_items" ORDER BY "id" DESC LIMIT %s')
+
         for sql in queries:
             try:
                 async with conn.cursor() as cur:

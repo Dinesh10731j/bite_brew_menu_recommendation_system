@@ -80,6 +80,45 @@ async def test_live_business_snapshot_uses_database_metrics():
 
 
 @pytest.mark.asyncio
+async def test_business_snapshot_prefers_actual_user_order_tables_when_present():
+    class FakeCursor:
+        def __init__(self):
+            self.queries = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, query, params=None):
+            self.queries.append((query, params))
+            return None
+
+        async def fetchone(self):
+            return (5,)
+
+        async def fetchall(self):
+            return [("Latte", 9), ("Tea", 7)]
+
+    class FakeConnection:
+        def __init__(self):
+            self.cursor_obj = FakeCursor()
+
+        def cursor(self):
+            return self.cursor_obj
+
+    conn = FakeConnection()
+    snapshot = await AIRepository.get_business_snapshot(conn)
+
+    queries = "\n".join(query for query, _ in conn.cursor_obj.queries)
+    assert "user_orders" in queries or "user_order_items" in queries
+    assert snapshot["has_data"] is True
+    assert snapshot["orders"] == 5
+    assert snapshot["popular_items"][0]["name"] == "Latte"
+
+
+@pytest.mark.asyncio
 async def test_command_center_without_business_data_returns_insufficient_data():
     service = AICommandCenterService()
     result = await service.get_command_center_payload()
